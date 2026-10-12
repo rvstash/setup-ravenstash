@@ -1,0 +1,105 @@
+name: Setup Ravenstash
+description: Install a verified portable rvs CLI without APT or a language runtime.
+author: Ravenstash
+
+branding:
+  icon: package
+  color: purple
+
+inputs:
+  version:
+    description: Exact stable or release-candidate CLI version, or latest.
+    required: false
+    default: latest
+  cache:
+    description: Restore and save the verified portable installation with GitHub Actions cache.
+    required: false
+    default: "true"
+  cache-key-suffix:
+    description: Optional cache-key suffix for deliberate cache invalidation.
+    required: false
+    default: ""
+  github-token:
+    description: Optional GitHub token used only to download release assets.
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: Exact installed rvs version.
+    value: ${{ steps.result.outputs.version }}
+  cache-hit:
+    description: Whether the exact verified installation was restored from cache.
+    value: ${{ steps.result.outputs.cache-hit }}
+  rvs-path:
+    description: Absolute path to the installed rvs executable.
+    value: ${{ steps.result.outputs.rvs-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      name: Resolve Ravenstash CLI release
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_CACHE: ${{ inputs.cache }}
+        INPUT_CACHE_KEY_SUFFIX: ${{ inputs.cache-key-suffix }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/prepare.sh"
+
+    - id: cache-restore
+      name: Restore Ravenstash CLI
+      if: inputs.cache == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.prepare.outputs.cache-root }}
+        key: ${{ steps.prepare.outputs.cache-key }}
+
+    - name: Authenticate Ravenstash installer
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        RVS_SETUP_INSTALLER: ${{ steps.prepare.outputs.installer }}
+        RVS_SETUP_WORK_ROOT: ${{ steps.prepare.outputs.work-root }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/fetch-installer.sh"
+
+    - name: Install Ravenstash CLI
+      if: steps.cache-restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        RVS_SETUP_INSTALLER: ${{ steps.prepare.outputs.installer }}
+        RVS_SETUP_VERSION: ${{ steps.prepare.outputs.version }}
+        RVS_SETUP_CACHE_ROOT: ${{ steps.prepare.outputs.cache-root }}
+        RVS_SETUP_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/install.sh"
+
+    - id: activate
+      name: Activate Ravenstash CLI
+      shell: bash
+      env:
+        RVS_SETUP_VERSION: ${{ steps.prepare.outputs.version }}
+        RVS_SETUP_CACHE_ROOT: ${{ steps.prepare.outputs.cache-root }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/activate.sh"
+
+    - name: Save Ravenstash CLI
+      if: inputs.cache == 'true' && steps.cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.prepare.outputs.cache-root }}
+        key: ${{ steps.prepare.outputs.cache-key }}
+
+    - id: result
+      name: Report Ravenstash CLI setup
+      shell: bash
+      env:
+        RESOLVED_VERSION: ${{ steps.prepare.outputs.version }}
+        RESTORED_CACHE_HIT: ${{ steps.cache-restore.outputs.cache-hit }}
+        RESOLVED_RVS_PATH: ${{ steps.activate.outputs.rvs-path }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/result.sh"
+
+    - name: Clean up installer files
+      if: always()
+      shell: bash
+      env:
+        RVS_SETUP_WORK_ROOT: ${{ steps.prepare.outputs.work-root }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/cleanup.sh"

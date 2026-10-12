@@ -1,0 +1,6 @@
+paths:
+  .github/workflows/ci.yml:
+    ignore:
+      # This is a current standard GitHub-hosted label. The pinned actionlint
+      # image predates it, so suppress only that stale runner inventory error.
+      - 'label "macos-15-intel" is unknown'

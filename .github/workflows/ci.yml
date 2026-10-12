@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check shell sources
+        run: |
+          bash -n scripts/*.sh tests/*.sh
+          shellcheck scripts/*.sh tests/*.sh
+
+  test:
+    name: Test · ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Check shell sources
+        run: bash -n scripts/*.sh tests/*.sh
+      - name: Run tests
+        run: bash tests/test-setup.sh
+
+  install:
+    name: Install · ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install the promoted release without a cache
+        id: setup
+        uses: ./
+        with:
+          cache: "false"
+      - name: Check the installed commands
+        env:
+          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+          RVS_PATH: ${{ steps.setup.outputs.rvs-path }}
+        run: |
+          test "$(command -v rvs)" = "$RVS_PATH"
+          test "$(rvs --version)" = "Ravenstash CLI ${INSTALLED_VERSION}"
+          test "$(ravenstash --version)" = "Ravenstash CLI ${INSTALLED_VERSION}"
+          command -v docker-credential-rvs
