@@ -10,7 +10,7 @@ write_output() {
   printf '%s=%s\n' "$1" "$2" >> "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 }
 
-requested_version="${INPUT_VERSION:-latest}"
+requested_version="${INPUT_VERSION:-}"
 cache_enabled="${INPUT_CACHE:-true}"
 cache_key_suffix="${INPUT_CACHE_KEY_SUFFIX:-}"
 
@@ -24,9 +24,15 @@ fi
 if (( ${#cache_key_suffix} > 128 )); then
   fail "cache-key-suffix must not exceed 128 characters"
 fi
-if [[ "$requested_version" != "latest" ]] \
-  && [[ ! "$requested_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?$ ]]; then
-  fail "version must be latest, X.Y.Z, or X.Y.ZrcN"
+[[ -n "$requested_version" ]] \
+  || fail "version is required: set it to an exact CLI release such as 0.15.1"
+version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(rc[1-9][0-9]*)?$'
+[[ "$requested_version" =~ $version_pattern ]] \
+  || fail "version must be an exact X.Y.Z or X.Y.ZrcN CLI release"
+major="${BASH_REMATCH[1]}"
+minor="${BASH_REMATCH[2]}"
+if (( major == 0 && minor < 15 )); then
+  fail "version must be 0.15.0 or later; earlier CLI releases have no portable installer"
 fi
 
 case "$(uname -s)" in
@@ -69,16 +75,7 @@ target="${system_name}-${architecture}"
 temporary_root="$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP is required}/setup-ravenstash.XXXXXX")"
 trap 'rm -rf -- "$temporary_root"' EXIT
 installer="${temporary_root}/install.sh"
-if [[ "$requested_version" == "latest" ]]; then
-  action_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  resolved_version="$(
-    RVS_SETUP_WORK_ROOT="$temporary_root" \
-    RVS_SETUP_INSTALLER="$installer" \
-      bash "${action_root}/scripts/fetch-installer.sh"
-  )"
-else
-  resolved_version="$requested_version"
-fi
+resolved_version="$requested_version"
 
 tool_cache="${RUNNER_TOOL_CACHE:-${RUNNER_TEMP}/tool-cache}"
 cache_root="${tool_cache}/ravenstash/setup-ravenstash/v2/${target}/${resolved_version}"

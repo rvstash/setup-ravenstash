@@ -7,43 +7,33 @@ fail() {
 }
 
 installer="${RVS_SETUP_INSTALLER:?RVS_SETUP_INSTALLER is required}"
+version="${RVS_SETUP_VERSION:?RVS_SETUP_VERSION is required}"
 work_root="${RVS_SETUP_WORK_ROOT:?RVS_SETUP_WORK_ROOT is required}"
-verified_version_path="${work_root}/installer-version"
 action_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ -f "$verified_version_path" ]]; then
-  [[ -x "$installer" ]] || fail "the verified installer is missing"
-  verified_version="$(<"$verified_version_path")"
-  [[ "$verified_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?$ ]] \
-    || fail "the verified installer version marker is invalid"
-  printf '%s\n' "$verified_version"
-  exit 0
-fi
-
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?$ ]] \
+  || fail "the requested Ravenstash CLI version is invalid"
 key="${action_root}/keys/ravenstash-cli.asc"
 [[ -f "$key" ]] || fail "the pinned Ravenstash release-signing key is missing"
 for command in awk curl gpg install sed; do
   command -v "$command" >/dev/null 2>&1 || fail "required command not found: ${command}"
 done
 
-partial_installer="${installer}.partial"
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
-  --max-redirs 0 -fsS https://ravenstash.com/install.sh --output "$partial_installer"
-bash -n "$partial_installer" || fail "the promoted Ravenstash installer is not valid Bash"
-
-version="$(sed -n 's/^readonly release_version="\([^"]*\)"$/\1/p' "$partial_installer")"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[1-9][0-9]*)?$ ]] \
-  || fail "the Ravenstash installer did not identify one valid release"
-
+# Use the installer published with the requested release, never a promoted
+# "latest" installer, so a job installs exactly what its workflow names.
 verification_root="${work_root}/installer-verification"
 install -d -m 0700 "$verification_root" "${verification_root}/gnupg"
+partial_installer="${installer}.partial"
 checksums="${verification_root}/ravenstash-cli-v${version}-checksums.txt"
 signature="${checksums}.asc"
 release_url="https://github.com/rvstash/ravenstash-cli/releases/download/v${version}"
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
-  "${release_url}/ravenstash-cli-v${version}-checksums.txt" --output "$checksums"
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL \
-  "${release_url}/ravenstash-cli-v${version}-checksums.txt.asc" --output "$signature"
+download() {
+  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$1" --output "$2" \
+    || fail "could not download $(basename "$1") for Ravenstash CLI ${version}"
+}
+download "${release_url}/ravenstash-cli-install.sh" "$partial_installer"
+download "${release_url}/ravenstash-cli-v${version}-checksums.txt" "$checksums"
+download "${release_url}/ravenstash-cli-v${version}-checksums.txt.asc" "$signature"
 
 fingerprint="$(
   gpg --no-options --homedir "${verification_root}/gnupg" --batch --with-colons \
@@ -72,11 +62,13 @@ elif command -v shasum >/dev/null 2>&1; then
 else
   fail "sha256sum or shasum is required to authenticate the installer"
 fi
-[[ "$actual" == "$expected" ]] || fail "the promoted installer checksum is invalid"
+[[ "$actual" == "$expected" ]] || fail "the Ravenstash installer checksum is invalid"
+bash -n "$partial_installer" || fail "the Ravenstash installer is not valid Bash"
+installer_version="$(sed -n 's/^readonly release_version="\([^"]*\)"$/\1/p' "$partial_installer")"
+[[ "$installer_version" == "$version" ]] \
+  || fail "the Ravenstash installer belongs to ${installer_version:-an unknown release}, not ${version}"
 grep -Fqx 'readonly portable_installer_api="1"' "$partial_installer" \
-  || fail "the promoted Ravenstash installer does not support portable CI setup yet"
+  || fail "the Ravenstash ${version} installer does not support portable CI setup"
 
 install -m 0700 "$partial_installer" "$installer"
-printf '%s\n' "$version" > "$verified_version_path"
 rm -f -- "$partial_installer"
-printf '%s\n' "$version"

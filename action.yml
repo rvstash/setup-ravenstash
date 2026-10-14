@@ -8,9 +8,8 @@ branding:
 
 inputs:
   version:
-    description: Exact stable or release-candidate CLI version, or latest.
-    required: false
-    default: latest
+    description: Exact stable (X.Y.Z) or release-candidate (X.Y.ZrcN) CLI version to install, 0.15.0 or later.
+    required: true
   cache:
     description: Restore and save the verified portable installation with GitHub Actions cache.
     required: false
@@ -50,7 +49,7 @@ runs:
     - id: cache-restore
       name: Restore Ravenstash CLI
       if: inputs.cache == 'true'
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.prepare.outputs.cache-root }}
         key: ${{ steps.prepare.outputs.cache-key }}
@@ -60,6 +59,7 @@ runs:
       shell: bash
       env:
         RVS_SETUP_INSTALLER: ${{ steps.prepare.outputs.installer }}
+        RVS_SETUP_VERSION: ${{ steps.prepare.outputs.version }}
         RVS_SETUP_WORK_ROOT: ${{ steps.prepare.outputs.work-root }}
       run: bash "$GITHUB_ACTION_PATH/scripts/fetch-installer.sh"
 
@@ -83,7 +83,7 @@ runs:
 
     - name: Save Ravenstash CLI
       if: inputs.cache == 'true' && steps.cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.prepare.outputs.cache-root }}
         key: ${{ steps.prepare.outputs.cache-key }}

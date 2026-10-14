@@ -6,9 +6,17 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    # Released CLI assets are immutable, but runner images and GitHub's
+    # release and cache services are not.
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
+
+env:
+  # The CLI release this action version is tested and documented with.
+  RVS_CLI_VERSION: "0.15.1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out exact source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check shell sources
@@ -37,7 +45,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check shell sources
@@ -46,7 +54,46 @@ jobs:
         run: bash tests/test-setup.sh
 
   install:
-    name: Install · ${{ matrix.runner }}
+    name: Install · ${{ matrix.runner }} · ${{ matrix.version || 'current' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
+        # Empty selects RVS_CLI_VERSION. Include must override this value to
+        # add a job instead of changing the existing ubuntu-24.04 job.
+        version: [""]
+        include:
+          # The oldest supported CLI release.
+          - runner: ubuntu-24.04
+            version: "0.15.0"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install an exact release without a cache
+        id: setup
+        uses: ./
+        with:
+          version: ${{ matrix.version || env.RVS_CLI_VERSION }}
+          cache: "false"
+      - name: Check the installed commands
+        env:
+          EXPECTED_VERSION: ${{ matrix.version || env.RVS_CLI_VERSION }}
+          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          RVS_PATH: ${{ steps.setup.outputs.rvs-path }}
+        run: |
+          test "$INSTALLED_VERSION" = "$EXPECTED_VERSION"
+          test "$CACHE_HIT" = false
+          test "$(command -v rvs)" = "$RVS_PATH"
+          test "$(rvs --version)" = "Ravenstash CLI ${EXPECTED_VERSION}"
+          test "$(ravenstash --version)" = "Ravenstash CLI ${EXPECTED_VERSION}"
+          command -v docker-credential-rvs
+
+  cache-save:
+    name: Cache save · ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -54,20 +101,48 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out exact source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install the promoted release without a cache
+      - name: Install and save a run-scoped cache
         id: setup
         uses: ./
         with:
-          cache: "false"
-      - name: Check the installed commands
+          version: ${{ env.RVS_CLI_VERSION }}
+          cache-key-suffix: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Check the cache miss
         env:
-          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+        run: |
+          test "$CACHE_HIT" = false
+          test "$(rvs --version)" = "Ravenstash CLI ${RVS_CLI_VERSION}"
+
+  cache-restore:
+    name: Cache restore · ${{ matrix.runner }}
+    needs: cache-save
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore the run-scoped cache
+        id: setup
+        uses: ./
+        with:
+          version: ${{ env.RVS_CLI_VERSION }}
+          cache-key-suffix: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Check the restored commands
+        env:
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
           RVS_PATH: ${{ steps.setup.outputs.rvs-path }}
         run: |
+          test "$CACHE_HIT" = true
           test "$(command -v rvs)" = "$RVS_PATH"
-          test "$(rvs --version)" = "Ravenstash CLI ${INSTALLED_VERSION}"
-          test "$(ravenstash --version)" = "Ravenstash CLI ${INSTALLED_VERSION}"
+          test "$(rvs --version)" = "Ravenstash CLI ${RVS_CLI_VERSION}"
+          test "$(ravenstash --version)" = "Ravenstash CLI ${RVS_CLI_VERSION}"
           command -v docker-credential-rvs

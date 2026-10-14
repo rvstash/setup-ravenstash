@@ -52,7 +52,7 @@ done
 test -n "$output"
 printf '%s\n' "$url" >> "${MOCK_CURL_LOG}"
 case "$url" in
-  https://ravenstash.com/install.sh)
+  */ravenstash-cli-install.sh)
     cp "${MOCK_INSTALLER_SOURCE}" "$output"
     ;;
   *.asc)
@@ -94,16 +94,16 @@ export MOCK_INSTALLER_SOURCE="$mock_installer"
 export MOCK_CURL_LOG="${temporary_directory}/curl.log"
 export RUNNER_TEMP="${temporary_directory}/runner"
 export RUNNER_TOOL_CACHE="${temporary_directory}/tools"
-export INPUT_VERSION="0.15.0"
+export INPUT_VERSION="0.15.1"
 export INPUT_CACHE=true
 export INPUT_CACHE_KEY_SUFFIX=fixture
 export GITHUB_OUTPUT="${temporary_directory}/prepare.out"
 mkdir -p "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE"
 
-# An exact-version prepare is network-free, so a cache hit needs no installer.
+# Prepare is network-free, so a cache hit needs no installer.
 bash "${root}/scripts/prepare.sh"
 test ! -e "$MOCK_CURL_LOG"
-grep -Fx 'version=0.15.0' "$GITHUB_OUTPUT"
+grep -Fx 'version=0.15.1' "$GITHUB_OUTPUT"
 expected_system=""
 expected_architecture=""
 case "$(uname -s)" in
@@ -122,23 +122,22 @@ case "$(uname -m)" in
 esac
 expected_target="${expected_system}-${expected_architecture}"
 grep -Fx "target=${expected_target}" "$GITHUB_OUTPUT"
-grep -Fx "cache-key=setup-ravenstash-v2-${expected_target}-0.15.0-fixture" "$GITHUB_OUTPUT"
+grep -Fx "cache-key=setup-ravenstash-v2-${expected_target}-0.15.1-fixture" "$GITHUB_OUTPUT"
 
 installer="$(sed -n 's/^installer=//p' "$GITHUB_OUTPUT")"
 work_root="$(sed -n 's/^work-root=//p' "$GITHUB_OUTPUT")"
 version="$(sed -n 's/^version=//p' "$GITHUB_OUTPUT")"
 cache_root="$(sed -n 's/^cache-root=//p' "$GITHUB_OUTPUT")"
 
-# A miss authenticates the installer once; a second call reuses that result.
+# A miss authenticates the installer published with the requested release.
 export RVS_SETUP_INSTALLER="$installer"
 export RVS_SETUP_WORK_ROOT="$work_root"
-test "$(bash "${root}/scripts/fetch-installer.sh")" = 0.15.1
+RVS_SETUP_VERSION="$version" bash "${root}/scripts/fetch-installer.sh"
+test -x "$installer"
 release_assets="https://github.com/rvstash/ravenstash-cli/releases/download/v0.15.1"
+grep -Fx "${release_assets}/ravenstash-cli-install.sh" "$MOCK_CURL_LOG"
 grep -Fx "${release_assets}/ravenstash-cli-v0.15.1-checksums.txt" "$MOCK_CURL_LOG"
 grep -Fx "${release_assets}/ravenstash-cli-v0.15.1-checksums.txt.asc" "$MOCK_CURL_LOG"
-test "$(grep -c -v -e '^https://ravenstash.com/install.sh$' -e "^${release_assets}/" "$MOCK_CURL_LOG")" = 0
-test "$(wc -l < "$MOCK_CURL_LOG")" -eq 3
-test "$(bash "${root}/scripts/fetch-installer.sh")" = 0.15.1
 test "$(wc -l < "$MOCK_CURL_LOG")" -eq 3
 
 RVS_SETUP_VERSION="$version" \
@@ -152,7 +151,7 @@ export GITHUB_OUTPUT="${temporary_directory}/activate.out"
 bash "${root}/scripts/activate.sh"
 grep -Fx "${cache_root}/bin" "$GITHUB_PATH"
 grep -Fx "rvs-path=${cache_root}/bin/rvs" "$GITHUB_OUTPUT"
-test "$(readlink "${cache_root}/versions/current")" = 0.15.0
+test "$(readlink "${cache_root}/versions/current")" = 0.15.1
 test "$(readlink "${cache_root}/bin/rvs")" = ../versions/current/rvs
 
 # Cached command links remain valid if the tool-cache root changes.
@@ -180,11 +179,13 @@ if INPUT_CACHE=maybe GITHUB_OUTPUT="${temporary_directory}/bad-cache.out" \
   printf 'expected invalid cache input to fail\n' >&2
   exit 1
 fi
-if INPUT_VERSION=1.2 GITHUB_OUTPUT="${temporary_directory}/bad-version.out" \
-  bash "${root}/scripts/prepare.sh" 2>/dev/null; then
-  printf 'expected invalid version input to fail\n' >&2
-  exit 1
-fi
+for invalid_version in "" latest 1.2 0.15 00.15.1 0.15.1.dev1 0.14.9; do
+  if INPUT_VERSION="$invalid_version" GITHUB_OUTPUT="${temporary_directory}/bad-version.out" \
+    bash "${root}/scripts/prepare.sh" 2>/dev/null; then
+    printf 'expected version input %s to fail\n' "${invalid_version:-<empty>}" >&2
+    exit 1
+  fi
+done
 if INPUT_VERSION=0.15.2rc0 GITHUB_OUTPUT="${temporary_directory}/bad-rc.out" \
   bash "${root}/scripts/prepare.sh" 2>/dev/null; then
   printf 'expected release candidate zero to fail\n' >&2
@@ -197,36 +198,31 @@ if INPUT_CACHE_KEY_SUFFIX="$long_suffix" GITHUB_OUTPUT="${temporary_directory}/l
   exit 1
 fi
 
-# Latest resolves the signed promoted installer before cache lookup.
-rm -f -- "$MOCK_CURL_LOG"
-export INPUT_VERSION=latest
-export INPUT_CACHE_KEY_SUFFIX=""
-export GITHUB_OUTPUT="${temporary_directory}/latest.out"
-bash "${root}/scripts/prepare.sh"
-grep -Fx 'version=0.15.1' "$GITHUB_OUTPUT"
-test "$(wc -l < "$MOCK_CURL_LOG")" -eq 3
-latest_work_root="$(sed -n 's/^work-root=//p' "$GITHUB_OUTPUT")"
-
-# Contract and checksum failures remain fail-closed.
+# Installer contract, release identity, and checksum failures remain fail-closed.
+expect_fetch_failure() {
+  local description="$1"
+  local requested="$2"
+  local failure_root="${temporary_directory}/runner/setup-ravenstash.${description}"
+  mkdir -p "$failure_root"
+  if RVS_SETUP_INSTALLER="${failure_root}/install.sh" \
+    RVS_SETUP_WORK_ROOT="$failure_root" \
+    RVS_SETUP_VERSION="$requested" \
+    bash "${root}/scripts/fetch-installer.sh" 2>/dev/null; then
+    printf 'expected %s to fail\n' "$description" >&2
+    exit 1
+  fi
+  test ! -e "${failure_root}/install.sh"
+}
+expect_fetch_failure other-release 0.15.0
 incompatible_installer="${temporary_directory}/incompatible-install.sh"
 grep -v 'portable_installer_api' "$mock_installer" > "$incompatible_installer"
-export MOCK_INSTALLER_SOURCE="$incompatible_installer"
-if GITHUB_OUTPUT="${temporary_directory}/incompatible.out" \
-  bash "${root}/scripts/prepare.sh" 2>/dev/null; then
-  printf 'expected an incompatible installer to fail\n' >&2
-  exit 1
-fi
-export MOCK_INSTALLER_SOURCE="$mock_installer"
-if MOCK_BAD_CHECKSUM=1 GITHUB_OUTPUT="${temporary_directory}/bad-checksum.out" \
-  bash "${root}/scripts/prepare.sh" 2>/dev/null; then
-  printf 'expected an invalid installer checksum to fail\n' >&2
-  exit 1
-fi
+MOCK_INSTALLER_SOURCE="$incompatible_installer" expect_fetch_failure incompatible 0.15.1
+MOCK_BAD_CHECKSUM=1 expect_fetch_failure bad-checksum 0.15.1
 
 # Version checks are exact rather than substring matches.
 printf '#!/usr/bin/env bash\nprintf "Ravenstash CLI 0.15.50\\n"\n' \
-  > "${relocated_cache}/versions/0.15.0/rvs"
-chmod 0755 "${relocated_cache}/versions/0.15.0/rvs"
+  > "${relocated_cache}/versions/0.15.1/rvs"
+chmod 0755 "${relocated_cache}/versions/0.15.1/rvs"
 if GITHUB_OUTPUT="${temporary_directory}/wrong-version.out" \
   bash "${root}/scripts/activate.sh" 2>/dev/null; then
   printf 'expected a mismatched executable version to fail\n' >&2
@@ -235,8 +231,6 @@ fi
 
 RVS_SETUP_WORK_ROOT="$work_root" bash "${root}/scripts/cleanup.sh"
 test ! -e "$work_root"
-RVS_SETUP_WORK_ROOT="$latest_work_root" bash "${root}/scripts/cleanup.sh"
-test ! -e "$latest_work_root"
 outside_cleanup_root="${temporary_directory}/keep"
 mkdir -p "$outside_cleanup_root"
 if RVS_SETUP_WORK_ROOT="$outside_cleanup_root" bash "${root}/scripts/cleanup.sh" 2>/dev/null; then
