@@ -12,7 +12,7 @@ The action requires CLI 0.15.0 or later. It fails closed instead of silently fal
 - name: Set up Ravenstash CLI
   uses: rvstash/setup-ravenstash@FULL_COMMIT_SHA # v0.1.0
   with:
-    version: "0.15.1"
+    version: "0.16.0"
 
 - name: Publish
   env:

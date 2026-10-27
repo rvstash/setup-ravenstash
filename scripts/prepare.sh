@@ -25,7 +25,7 @@ if (( ${#cache_key_suffix} > 128 )); then
   fail "cache-key-suffix must not exceed 128 characters"
 fi
 [[ -n "$requested_version" ]] \
-  || fail "version is required: set it to an exact CLI release such as 0.15.1"
+  || fail "version is required: set it to an exact CLI release such as 0.16.0"
 version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(rc[1-9][0-9]*)?$'
 [[ "$requested_version" =~ $version_pattern ]] \
   || fail "version must be an exact X.Y.Z or X.Y.ZrcN CLI release"

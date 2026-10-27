@@ -16,7 +16,7 @@ permissions:
 
 env:
   # The CLI release this action version is tested and documented with.
-  RVS_CLI_VERSION: "0.15.1"
+  RVS_CLI_VERSION: "0.16.0"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
