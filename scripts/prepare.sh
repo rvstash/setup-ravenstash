@@ -57,8 +57,8 @@ case "$(uname -s)" in
     macos_version="$(sw_vers -productVersion 2>/dev/null)" \
       || fail "could not identify the macOS version"
     macos_major="${macos_version%%.*}"
-    if [[ ! "$macos_major" =~ ^[0-9]+$ ]] || (( macos_major < 14 )); then
-      fail "the portable rvs build requires macOS 14 or newer (found ${macos_version})"
+    if [[ ! "$macos_major" =~ ^[0-9]+$ ]] || (( macos_major < 15 )); then
+      fail "the portable rvs build requires macOS 15 or newer (found ${macos_version})"
     fi
     system_name="macos"
     ;;
