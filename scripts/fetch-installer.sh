@@ -27,9 +27,25 @@ partial_installer="${installer}.partial"
 checksums="${verification_root}/ravenstash-cli-v${version}-checksums.txt"
 signature="${checksums}.asc"
 release_url="https://github.com/rvstash/ravenstash-cli/releases/download/v${version}"
+# curl's --retry covers timeouts and transient HTTP statuses but not a reset or
+# dropped connection, so connection failures are retried here. Exit status 22
+# is an HTTP error that curl has already retried when it was transient.
 download() {
-  curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL "$1" --output "$2" \
-    || fail "could not download $(basename "$1") for Ravenstash CLI ${version}"
+  local attempt status
+  for attempt in 1 2 3; do
+    status=0
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 2 "$1" --output "$2" \
+      || status=$?
+    if (( status == 0 )); then
+      return
+    fi
+    if (( status == 22 || attempt == 3 )); then
+      fail "could not download $(basename "$1") for Ravenstash CLI ${version}"
+    fi
+    printf 'setup-ravenstash: download of %s interrupted (curl exit %s); retrying\n' \
+      "$(basename "$1")" "$status" >&2
+    sleep "$((attempt * 2))"
+  done
 }
 download "${release_url}/ravenstash-cli-install.sh" "$partial_installer"
 download "${release_url}/ravenstash-cli-v${version}-checksums.txt" "$checksums"

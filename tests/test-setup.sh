@@ -51,6 +51,17 @@ while (( $# > 0 )); do
 done
 test -n "$output"
 printf '%s\n' "$url" >> "${MOCK_CURL_LOG}"
+if [[ -n "${MOCK_HTTP_ERROR:-}" ]]; then
+  exit 22
+fi
+if [[ -n "${MOCK_DROP_ONCE_ROOT:-}" ]]; then
+  marker="${MOCK_DROP_ONCE_ROOT}/$(basename "$url")"
+  if [[ ! -e "$marker" ]]; then
+    : > "$marker"
+    printf 'partial' > "$output"
+    exit 56
+  fi
+fi
 case "$url" in
   */ravenstash-cli-install.sh)
     cp "${MOCK_INSTALLER_SOURCE}" "$output"
@@ -87,7 +98,8 @@ for argument in "$@"; do
   fi
 done
 MOCK_GPG
-chmod 0755 "${mock_bin}/curl" "${mock_bin}/gpg"
+printf '#!/usr/bin/env bash\n' > "${mock_bin}/sleep"
+chmod 0755 "${mock_bin}/curl" "${mock_bin}/gpg" "${mock_bin}/sleep"
 
 export PATH="${mock_bin}:${PATH}"
 export MOCK_INSTALLER_SOURCE="$mock_installer"
@@ -218,6 +230,21 @@ incompatible_installer="${temporary_directory}/incompatible-install.sh"
 grep -v 'portable_installer_api' "$mock_installer" > "$incompatible_installer"
 MOCK_INSTALLER_SOURCE="$incompatible_installer" expect_fetch_failure incompatible 0.15.1
 MOCK_BAD_CHECKSUM=1 expect_fetch_failure bad-checksum 0.15.1
+
+# A dropped connection is retried; an HTTP error is not.
+retry_root="${temporary_directory}/runner/setup-ravenstash.retry"
+mkdir -p "${retry_root}/dropped"
+: > "$MOCK_CURL_LOG"
+MOCK_DROP_ONCE_ROOT="${retry_root}/dropped" \
+  RVS_SETUP_INSTALLER="${retry_root}/install.sh" \
+  RVS_SETUP_WORK_ROOT="$retry_root" \
+  RVS_SETUP_VERSION=0.15.1 \
+  bash "${root}/scripts/fetch-installer.sh" 2>/dev/null
+test -x "${retry_root}/install.sh"
+test "$(wc -l < "$MOCK_CURL_LOG")" -eq 6
+: > "$MOCK_CURL_LOG"
+MOCK_HTTP_ERROR=1 expect_fetch_failure http-error 0.15.1
+test "$(wc -l < "$MOCK_CURL_LOG")" -eq 1
 
 # Version checks are exact rather than substring matches.
 printf '#!/usr/bin/env bash\nprintf "Ravenstash CLI 0.15.50\\n"\n' \
