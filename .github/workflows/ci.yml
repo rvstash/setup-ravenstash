@@ -109,12 +109,17 @@ jobs:
         uses: ./
         with:
           version: ${{ env.RVS_CLI_VERSION }}
-          cache-key-suffix: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-key-suffix: ci-${{ github.run_id }}
       - name: Check the cache miss
         env:
           CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+        # The key is shared by every attempt of the run, so a rerun of only the
+        # failed jobs restores what the first attempt saved. A rerun may
+        # therefore hit a cache this job saved earlier.
         run: |
-          test "$CACHE_HIT" = false
+          if [[ "$GITHUB_RUN_ATTEMPT" == 1 ]]; then
+            test "$CACHE_HIT" = false
+          fi
           test "$(rvs --version)" = "Ravenstash CLI ${RVS_CLI_VERSION}"
 
   cache-restore:
@@ -135,7 +140,7 @@ jobs:
         uses: ./
         with:
           version: ${{ env.RVS_CLI_VERSION }}
-          cache-key-suffix: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          cache-key-suffix: ci-${{ github.run_id }}
       - name: Check the restored commands
         env:
           CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
