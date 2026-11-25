@@ -10,7 +10,7 @@ The action requires CLI 0.15.0 or later. It fails closed instead of silently fal
 
 ```yaml
 - name: Set up Ravenstash CLI
-  uses: rvstash/setup-ravenstash@FULL_COMMIT_SHA # v0.1.0
+  uses: rvstash/setup-ravenstash@FULL_COMMIT_SHA # v0.1.1
   with:
     version: "0.16.1"
 
